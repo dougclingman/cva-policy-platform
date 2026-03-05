@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { Header } from "@/components/layout/Header";
 import Link from "next/link";
-import { Users, KeyRound, Link2, Bell, ChevronRight, CheckCircle, XCircle } from "lucide-react";
+import { Users, KeyRound, Link2, Bell, BarChart2, ChevronRight, CheckCircle, XCircle } from "lucide-react";
 
 export const metadata = { title: "Admin" };
 
@@ -15,11 +15,12 @@ export default async function AdminOverviewPage() {
 
   if (!hasPermission(permissions, PERMISSIONS.ADMIN_VIEW)) redirect("/dashboard");
 
-  const [userCount, roleCount, ssoConfig, emailConfig] = await Promise.all([
+  const [userCount, roleCount, ssoConfig, emailConfig, totalViews] = await Promise.all([
     prisma.user.count({ where: { isActive: true } }),
     prisma.role.count(),
     prisma.sSOConfig.findFirst(),
     prisma.emailConfig.findFirst(),
+    prisma.policyView.count(),
   ]);
 
   const sections = [
@@ -60,6 +61,15 @@ export default async function AdminOverviewPage() {
       permission: PERMISSIONS.ADMIN_NOTIFICATIONS,
       color:      "text-orange-600 bg-orange-50",
       statusOk:   emailConfig?.isEnabled,
+    },
+    {
+      href:       "/admin/analytics",
+      label:      "Analytics",
+      desc:       "Most accessed policies and viewer comments",
+      icon:       BarChart2,
+      stat:       `${totalViews.toLocaleString()} total views`,
+      permission: PERMISSIONS.ADMIN_VIEW,
+      color:      "text-teal-600 bg-teal-50",
     },
   ];
 

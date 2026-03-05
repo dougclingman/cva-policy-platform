@@ -8,6 +8,7 @@ import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { ArrowLeft, Pencil, Clock, User, Tag, Archive } from "lucide-react";
 import { PolicyReviewActions } from "@/components/policies/PolicyReviewActions";
+import { CommentsSection } from "@/components/policies/CommentsSection";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -27,6 +28,7 @@ export default async function PolicyDetailPage({ params }: { params: { id: strin
       updatedBy: { select: { name: true } },
       tags:      { include: { tag: true } },
       reviews:   { include: { reviewer: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
+      comments:  { include: { user: { select: { name: true } } }, orderBy: { createdAt: "asc" } },
     },
   });
 
@@ -35,6 +37,11 @@ export default async function PolicyDetailPage({ params }: { params: { id: strin
   // Viewers can only see published policies
   const canSeeAll = hasPermission(permissions, PERMISSIONS.POLICIES_CREATE);
   if (!canSeeAll && policy.status !== "PUBLISHED") notFound();
+
+  // Track view
+  if (session?.user?.id) {
+    prisma.policyView.create({ data: { policyId: policy.id, userId: session.user.id } }).catch(() => {});
+  }
 
   const canEdit    = hasPermission(permissions, PERMISSIONS.POLICIES_UPDATE);
   const canReview  = hasPermission(permissions, PERMISSIONS.POLICIES_REVIEW) && policy.status === "UNDER_REVIEW";
@@ -158,6 +165,19 @@ export default async function PolicyDetailPage({ params }: { params: { id: strin
             ))}
           </div>
         </div>
+      )}
+
+      {/* Comments */}
+      {policy.status === "PUBLISHED" && (
+        <CommentsSection
+          policyId={policy.id}
+          initialComments={policy.comments.map((c) => ({
+            ...c,
+            createdAt: c.createdAt.toISOString(),
+            updatedAt: c.updatedAt.toISOString(),
+          }))}
+          currentUserName={session?.user?.name ?? null}
+        />
       )}
     </div>
   );

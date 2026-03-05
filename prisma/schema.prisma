@@ -22,6 +22,8 @@ model User {
   createdPolicies Policy[]       @relation("CreatedBy")
   updatedPolicies Policy[]       @relation("UpdatedBy")
   reviews         PolicyReview[]
+  views           PolicyView[]
+  comments        Comment[]
 
   @@map("users")
 }
@@ -105,8 +107,10 @@ model Policy {
   createdBy User  @relation("CreatedBy", fields: [createdById], references: [id])
   updatedBy User? @relation("UpdatedBy", fields: [updatedById], references: [id])
 
-  reviews PolicyReview[]
-  tags    PolicyTag[]
+  reviews  PolicyReview[]
+  tags     PolicyTag[]
+  views    PolicyView[]
+  comments Comment[]
 
   @@map("policies")
 }
@@ -143,6 +147,34 @@ model PolicyTag {
 
   @@id([policyId, tagId])
   @@map("policy_tags")
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+model PolicyView {
+  id       String   @id @default(cuid())
+  policyId String
+  userId   String?
+  viewedAt DateTime @default(now())
+
+  policy Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("policy_views")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  policyId  String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  policy Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("comments")
 }
 
 // ─── SSO Configuration ────────────────────────────────────────────────────────
