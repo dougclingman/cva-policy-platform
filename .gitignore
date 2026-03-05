@@ -25,6 +25,9 @@ yarn-error.log*
 # prisma
 prisma/migrations/
 
+# typescript
+*.tsbuildinfo
+
 # misc
 .DS_Store
 *.pem
