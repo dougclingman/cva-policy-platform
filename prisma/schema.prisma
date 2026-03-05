@@ -1,0 +1,196 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users & Auth ─────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String?  // null for SSO-only users
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userRoles       UserRole[]
+  createdPolicies Policy[]       @relation("CreatedBy")
+  updatedPolicies Policy[]       @relation("UpdatedBy")
+  reviews         PolicyReview[]
+
+  @@map("users")
+}
+
+// ─── RBAC ─────────────────────────────────────────────────────────────────────
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false) // system roles cannot be deleted
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(cuid())
+  name        String @unique // e.g. "policies:create"
+  description String?
+  resource    String // e.g. "policies", "admin"
+  action      String // e.g. "create", "read", "publish"
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ─── Policies ─────────────────────────────────────────────────────────────────
+
+enum PolicyStatus {
+  DRAFT
+  UNDER_REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+model Policy {
+  id          String       @id @default(cuid())
+  title       String
+  slug        String       @unique
+  summary     String?
+  content     String       // Markdown content
+  category    String?
+  status      PolicyStatus @default(DRAFT)
+  version     Int          @default(1)
+  publishedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  createdById String
+  updatedById String?
+
+  createdBy User  @relation("CreatedBy", fields: [createdById], references: [id])
+  updatedBy User? @relation("UpdatedBy", fields: [updatedById], references: [id])
+
+  reviews PolicyReview[]
+  tags    PolicyTag[]
+
+  @@map("policies")
+}
+
+model PolicyReview {
+  id         String   @id @default(cuid())
+  policyId   String
+  reviewerId String
+  status     String   // APPROVED | REJECTED | PENDING
+  comments   String?
+  createdAt  DateTime @default(now())
+
+  policy   Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  reviewer User   @relation(fields: [reviewerId], references: [id])
+
+  @@map("policy_reviews")
+}
+
+model Tag {
+  id   String @id @default(cuid())
+  name String @unique
+
+  policies PolicyTag[]
+
+  @@map("tags")
+}
+
+model PolicyTag {
+  policyId String
+  tagId    String
+
+  policy Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([policyId, tagId])
+  @@map("policy_tags")
+}
+
+// ─── SSO Configuration ────────────────────────────────────────────────────────
+
+model SSOConfig {
+  id           String   @id @default(cuid())
+  provider     String   @default("saml") // "saml" | "oidc"
+  isEnabled    Boolean  @default(false)
+  entityId     String?
+  ssoUrl       String?
+  certificate  String?
+  attributeMap Json?    // maps IdP attributes → user fields
+  defaultRoleId String? // role assigned to new SSO users
+  updatedAt    DateTime @updatedAt
+
+  @@map("sso_configs")
+}
+
+// ─── Email / Notification Configuration ──────────────────────────────────────
+
+model EmailConfig {
+  id        String   @id @default(cuid())
+  isEnabled Boolean  @default(false)
+  smtpHost  String?
+  smtpPort  Int?
+  smtpUser  String?
+  smtpPass  String?  // stored encrypted in production
+  fromEmail String?
+  fromName  String?
+  updatedAt DateTime @updatedAt
+
+  notifications EmailNotification[]
+
+  @@map("email_configs")
+}
+
+model EmailNotification {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  trigger         String   // e.g. "policy.published" | "policy.review_requested" | "user.created"
+  isEnabled       Boolean  @default(false)
+  templateSubject String?
+  templateBody    String?
+  configId        String
+  updatedAt       DateTime @updatedAt
+
+  config EmailConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@map("email_notifications")
+}
