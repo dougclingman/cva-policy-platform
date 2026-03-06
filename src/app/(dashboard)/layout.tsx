@@ -8,7 +8,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
-  const branding = await prisma.brandingConfig.findFirst() ?? {
+  const branding = await prisma.brandingConfig.findFirst().catch(() => null) ?? {
     platformName: "Yield",
     logoUrl:      null,
     tagline:      null,

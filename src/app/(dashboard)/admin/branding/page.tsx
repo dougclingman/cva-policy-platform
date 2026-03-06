@@ -15,7 +15,7 @@ export default async function BrandingPage() {
 
   if (!hasPermission(permissions, PERMISSIONS.ADMIN_VIEW)) redirect("/admin");
 
-  const branding = await prisma.brandingConfig.findFirst() ?? {
+  const branding = await prisma.brandingConfig.findFirst().catch(() => null) ?? {
     platformName: "Yield",
     tagline:      null,
     logoUrl:      null,
