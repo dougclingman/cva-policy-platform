@@ -1,3 +1,5 @@
+"use client";
+import { useState, useEffect } from "react";
 import { Sun, Cloud, CloudRain, CloudSnow, CloudLightning, Wind, Droplets, Thermometer } from "lucide-react";
 import type { WeatherData } from "@/app/api/weather/route";
 
@@ -24,11 +26,28 @@ const CONDITION_COLORS: Record<string, string> = {
   wind:   "text-teal-400",
 };
 
-interface Props {
-  weather: WeatherData;
-}
+export function WeatherWidget() {
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [error, setError]     = useState(false);
 
-export function WeatherWidget({ weather }: Props) {
+  useEffect(() => {
+    fetch("/api/weather")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setWeather)
+      .catch(() => setError(true));
+  }, []);
+
+  if (error) return <WeatherWidgetError />;
+
+  if (!weather) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5 flex items-center gap-3 text-sm text-slate-400">
+        <Thermometer className="h-5 w-5 flex-shrink-0 animate-pulse" />
+        <span>Loading weather…</span>
+      </div>
+    );
+  }
+
   const iconColor = CONDITION_COLORS[weather.condition] ?? "text-amber-400";
 
   return (

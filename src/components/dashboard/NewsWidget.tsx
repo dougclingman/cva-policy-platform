@@ -1,3 +1,5 @@
+"use client";
+import { useState, useEffect } from "react";
 import { Newspaper, ExternalLink } from "lucide-react";
 import type { NewsArticle } from "@/app/api/news/route";
 
@@ -16,11 +18,17 @@ function timeAgo(dateStr: string): string {
   }
 }
 
-interface Props {
-  articles: NewsArticle[];
-}
+export function NewsWidget() {
+  const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [loaded, setLoaded]     = useState(false);
 
-export function NewsWidget({ articles }: Props) {
+  useEffect(() => {
+    fetch("/api/news")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data: NewsArticle[]) => { setArticles(data); setLoaded(true); })
+      .catch(() => setLoaded(true));
+  }, []);
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <div className="flex items-center gap-2 px-6 py-4 border-b border-gray-100">
@@ -31,7 +39,7 @@ export function NewsWidget({ articles }: Props) {
 
       {articles.length === 0 ? (
         <div className="px-6 py-8 text-center text-sm text-slate-400">
-          News feed unavailable — check back shortly.
+          {loaded ? "News feed unavailable — check back shortly." : "Loading news…"}
         </div>
       ) : (
         <div className="divide-y divide-gray-50">
