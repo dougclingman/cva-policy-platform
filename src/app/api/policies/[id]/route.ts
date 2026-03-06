@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/apiAuth";
 import { PERMISSIONS } from "@/lib/permissions";
@@ -34,7 +36,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
   try {
     const body = await req.json();
-    const { title, summary, content, category, status, tagIds } = body;
+    const { title, summary, content, category, status, tagIds,
+            reviewFrequency, nextReviewDate, reviewReminderDays } = body;
 
     const current = await prisma.policy.findUnique({ where: { id: params.id } });
     if (!current) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -59,6 +62,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         publishedAt: status === "PUBLISHED" && !current.publishedAt ? new Date() : current.publishedAt,
         version:     current.version + 1,
         updatedById: session!.user.id,
+        reviewFrequency:    reviewFrequency ?? current.reviewFrequency,
+        nextReviewDate:     nextReviewDate !== undefined
+          ? (nextReviewDate ? new Date(nextReviewDate) : null)
+          : current.nextReviewDate,
+        reviewReminderDays: reviewReminderDays ?? current.reviewReminderDays,
         tags: tagIds !== undefined
           ? {
               deleteMany: {},
@@ -77,20 +85,47 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
 // PATCH — lifecycle actions (approve, reject, publish, archive, submit_review)
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await import("next-auth").then((m) => m.getServerSession(await import("@/lib/auth").then((a) => a.authOptions)));
+  const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { action, comment } = await req.json();
+  const { action, comment, acknowledgmentDeadline } = await req.json();
   const permissions = session.user.permissions;
 
   const policy = await prisma.policy.findUnique({ where: { id: params.id } });
   if (!policy) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const transitions: Record<string, { requiredPerm: string; nextStatus: string; createReview?: boolean; reviewStatus?: string }> = {
+  // Handle acknowledgment request separately
+  if (action === "request_acknowledgment") {
+    if (!permissions.includes(PERMISSIONS.POLICIES_PUBLISH)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    await prisma.policy.update({
+      where: { id: params.id },
+      data: {
+        acknowledgmentRequired: true,
+        acknowledgmentDeadline: acknowledgmentDeadline ? new Date(acknowledgmentDeadline) : null,
+        updatedById: session.user.id,
+      },
+    });
+    return NextResponse.json({ success: true });
+  }
+
+  if (action === "clear_acknowledgment") {
+    if (!permissions.includes(PERMISSIONS.POLICIES_PUBLISH)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    await prisma.policy.update({
+      where: { id: params.id },
+      data: { acknowledgmentRequired: false, acknowledgmentDeadline: null, updatedById: session.user.id },
+    });
+    return NextResponse.json({ success: true });
+  }
+
+  const transitions: Record<string, { requiredPerm: string; nextStatus: string; createReview?: boolean; reviewStatus?: string; updateReviewedAt?: boolean }> = {
     submit_review: { requiredPerm: PERMISSIONS.POLICIES_PUBLISH, nextStatus: "UNDER_REVIEW" },
-    approve:       { requiredPerm: PERMISSIONS.POLICIES_REVIEW,  nextStatus: "UNDER_REVIEW", createReview: true, reviewStatus: "APPROVED" },
+    approve:       { requiredPerm: PERMISSIONS.POLICIES_REVIEW,  nextStatus: "UNDER_REVIEW", createReview: true, reviewStatus: "APPROVED", updateReviewedAt: true },
     reject:        { requiredPerm: PERMISSIONS.POLICIES_REVIEW,  nextStatus: "DRAFT",        createReview: true, reviewStatus: "REJECTED" },
-    publish:       { requiredPerm: PERMISSIONS.POLICIES_PUBLISH, nextStatus: "PUBLISHED" },
+    publish:       { requiredPerm: PERMISSIONS.POLICIES_PUBLISH, nextStatus: "PUBLISHED", updateReviewedAt: true },
     archive:       { requiredPerm: PERMISSIONS.POLICIES_PUBLISH, nextStatus: "ARCHIVED" },
   };
 
@@ -100,13 +135,32 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Recalculate next review date if this action marks a review completion
+  function calcNextReviewDate(frequency: string): Date | null {
+    const now = new Date();
+    switch (frequency) {
+      case "MONTHLY":     now.setMonth(now.getMonth() + 1); return now;
+      case "QUARTERLY":   now.setMonth(now.getMonth() + 3); return now;
+      case "SEMI_ANNUAL": now.setMonth(now.getMonth() + 6); return now;
+      case "ANNUAL":      now.setFullYear(now.getFullYear() + 1); return now;
+      default:            return null;
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
+    const reviewedAt = transition.updateReviewedAt ? new Date() : policy.lastReviewedAt;
+    const nextReview = transition.updateReviewedAt && policy.reviewFrequency !== "NONE"
+      ? calcNextReviewDate(policy.reviewFrequency)
+      : policy.nextReviewDate;
+
     await tx.policy.update({
       where: { id: params.id },
       data: {
-        status:      transition.nextStatus as "DRAFT" | "UNDER_REVIEW" | "PUBLISHED" | "ARCHIVED",
-        publishedAt: transition.nextStatus === "PUBLISHED" ? (policy.publishedAt ?? new Date()) : policy.publishedAt,
-        updatedById: session.user.id,
+        status:        transition.nextStatus as "DRAFT" | "UNDER_REVIEW" | "PUBLISHED" | "ARCHIVED",
+        publishedAt:   transition.nextStatus === "PUBLISHED" ? (policy.publishedAt ?? new Date()) : policy.publishedAt,
+        updatedById:   session.user.id,
+        lastReviewedAt: reviewedAt,
+        nextReviewDate: nextReview,
       },
     });
 

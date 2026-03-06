@@ -38,12 +38,17 @@ export async function PUT(req: NextRequest) {
     ? await prisma.emailConfig.update({ where: { id: existing.id }, data: configData })
     : await prisma.emailConfig.create({ data: configData as Parameters<typeof prisma.emailConfig.create>[0]["data"] });
 
-  // Update individual notification toggles
+  // Update individual notification toggles and templates
   if (Array.isArray(notifications)) {
     for (const n of notifications) {
+      const { id, isEnabled: nEnabled, templateSubject, templateBody } = n;
       await prisma.emailNotification.update({
-        where: { id: n.id },
-        data:  { isEnabled: n.isEnabled },
+        where: { id },
+        data: {
+          isEnabled: nEnabled,
+          templateSubject: templateSubject || null,
+          templateBody:    templateBody    || null,
+        },
       });
     }
   }

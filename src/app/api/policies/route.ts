@@ -28,7 +28,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { title, summary, content, category, status, tagIds } = body;
+    const { title, summary, content, category, status, tagIds,
+            reviewFrequency, nextReviewDate, reviewReminderDays } = body;
 
     if (!title?.trim() || !content?.trim()) {
       return NextResponse.json({ error: "Title and content are required" }, { status: 400 });
@@ -47,6 +48,9 @@ export async function POST(req: NextRequest) {
         category:    category || null,
         status:      status ?? "DRAFT",
         publishedAt: status === "PUBLISHED" ? new Date() : null,
+        reviewFrequency:    reviewFrequency ?? "NONE",
+        nextReviewDate:     nextReviewDate ? new Date(nextReviewDate) : null,
+        reviewReminderDays: reviewReminderDays ?? 30,
         createdById: session!.user.id,
         tags: tagIds?.length
           ? { create: tagIds.map((id: string) => ({ tagId: id })) }

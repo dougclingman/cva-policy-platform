@@ -3,7 +3,27 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { CheckCircle, Mail, Bell } from "lucide-react";
+import { CheckCircle, Mail, Bell, ChevronDown, ChevronUp } from "lucide-react";
+
+const TRIGGER_VARIABLES: Record<string, string[]> = {
+  "policy.published":                ["{{policyTitle}}", "{{publishedBy}}", "{{policyUrl}}"],
+  "policy.review_requested":         ["{{policyTitle}}", "{{reviewerName}}", "{{policyUrl}}"],
+  "policy.review_completed":         ["{{policyTitle}}", "{{reviewStatus}}", "{{policyUrl}}"],
+  "policy.archived":                 ["{{policyTitle}}", "{{archivedBy}}"],
+  "policy.review_due":               ["{{policyTitle}}", "{{dueDate}}", "{{policyUrl}}"],
+  "policy.acknowledgment_requested": ["{{policyTitle}}", "{{deadline}}", "{{policyUrl}}"],
+  "policy.acknowledgment_reminder":  ["{{policyTitle}}", "{{deadline}}", "{{policyUrl}}"],
+  "user.created":                    ["{{userName}}", "{{userEmail}}"],
+  "user.deactivated":                ["{{userName}}", "{{userEmail}}"],
+  "travel.exception_requested":      ["{{travelerName}}", "{{destination}}", "{{travelDates}}"],
+  "travel.exception_configured":     ["{{travelerName}}", "{{destination}}", "{{exceptionExpiry}}"],
+  "travel.exception_removed":        ["{{travelerName}}", "{{destination}}"],
+  "travel.exception_removal_reminder": ["{{travelerName}}", "{{destination}}", "{{returnDate}}"],
+  "announcement.published":          ["{{announcementTitle}}", "{{body}}", "{{platformUrl}}"],
+  "report.reminder":                 ["{{userName}}", "{{dueDate}}", "{{reportUrl}}"],
+  "oncall.upcoming":                 ["{{userName}}", "{{startDate}}", "{{endDate}}"],
+  "task.deadline":                   ["{{taskTitle}}", "{{projectTitle}}", "{{dueDate}}", "{{assigneeName}}", "{{taskUrl}}"],
+};
 
 interface EmailNotification {
   id: string;
@@ -11,7 +31,21 @@ interface EmailNotification {
   description?: string | null;
   trigger: string;
   isEnabled: boolean;
+  templateSubject: string;
+  templateBody: string;
+  expanded: boolean;
 }
+
+interface EmailNotificationInput {
+  id: string;
+  name: string;
+  description?: string | null;
+  trigger: string;
+  isEnabled: boolean;
+  templateSubject?: string | null;
+  templateBody?: string | null;
+}
+
 interface EmailConfig {
   id?: string;
   isEnabled: boolean;
@@ -21,7 +55,7 @@ interface EmailConfig {
   smtpPass?: string | null;
   fromEmail?: string | null;
   fromName?: string | null;
-  notifications: EmailNotification[];
+  notifications: EmailNotificationInput[];
 }
 
 interface Props { config: EmailConfig | null }
@@ -36,7 +70,18 @@ export function EmailConfigForm({ config }: Props) {
   const [smtpPass,       setSmtpPass]       = useState("");
   const [fromEmail,      setFromEmail]      = useState(config?.fromEmail ?? "");
   const [fromName,       setFromName]       = useState(config?.fromName ?? "CVA IT Policies");
-  const [notifications,  setNotifications]  = useState<EmailNotification[]>(config?.notifications ?? []);
+  const [notifications,  setNotifications]  = useState<EmailNotification[]>(
+    (config?.notifications ?? []).map((n) => ({
+      id:              n.id,
+      name:            n.name,
+      description:     n.description,
+      trigger:         n.trigger,
+      isEnabled:       n.isEnabled,
+      templateSubject: n.templateSubject ?? "",
+      templateBody:    n.templateBody ?? "",
+      expanded:        false,
+    }))
+  );
   const [loading,        setLoading]        = useState(false);
   const [saved,          setSaved]          = useState(false);
   const [testLoading,    setTestLoading]    = useState(false);
@@ -45,6 +90,24 @@ export function EmailConfigForm({ config }: Props) {
   function toggleNotification(id: string) {
     setNotifications((prev) =>
       prev.map((n) => n.id === id ? { ...n, isEnabled: !n.isEnabled } : n)
+    );
+  }
+
+  function toggleExpanded(id: string) {
+    setNotifications((prev) =>
+      prev.map((n) => n.id === id ? { ...n, expanded: !n.expanded } : n)
+    );
+  }
+
+  function updateTemplateSubject(id: string, value: string) {
+    setNotifications((prev) =>
+      prev.map((n) => n.id === id ? { ...n, templateSubject: value } : n)
+    );
+  }
+
+  function updateTemplateBody(id: string, value: string) {
+    setNotifications((prev) =>
+      prev.map((n) => n.id === id ? { ...n, templateBody: value } : n)
     );
   }
 
@@ -59,7 +122,12 @@ export function EmailConfigForm({ config }: Props) {
         body: JSON.stringify({
           isEnabled, smtpHost, smtpPort: parseInt(smtpPort), smtpUser,
           smtpPass: smtpPass || undefined, fromEmail, fromName,
-          notifications: notifications.map((n) => ({ id: n.id, isEnabled: n.isEnabled })),
+          notifications: notifications.map((n) => ({
+            id:              n.id,
+            isEnabled:       n.isEnabled,
+            templateSubject: n.templateSubject,
+            templateBody:    n.templateBody,
+          })),
         }),
       });
       setSaved(true);
@@ -189,28 +257,102 @@ export function EmailConfigForm({ config }: Props) {
           <Bell className="h-5 w-5 text-slate-400" />
           <h3 className="font-semibold text-slate-900">Notification Triggers</h3>
         </div>
-        <div className="divide-y divide-gray-50">
-          {notifications.map((notif) => (
-            <div key={notif.id} className="flex items-center justify-between px-6 py-4">
-              <div>
-                <p className="text-sm font-medium text-slate-900">{notif.name}</p>
-                {notif.description && (
-                  <p className="text-xs text-slate-400 mt-0.5">{notif.description}</p>
+        <div className="divide-y divide-gray-100">
+          {notifications.map((notif) => {
+            const triggerVars = TRIGGER_VARIABLES[notif.trigger] ?? [];
+            return (
+              <div key={notif.id}>
+                {/* Main trigger row */}
+                <div className="flex items-center justify-between px-6 py-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-slate-900">{notif.name}</p>
+                    {notif.description && (
+                      <p className="text-xs text-slate-400 mt-0.5">{notif.description}</p>
+                    )}
+                    <code className="text-[10px] text-slate-400 font-mono mt-0.5 block">{notif.trigger}</code>
+                  </div>
+                  <div className="flex items-center gap-3 ml-4 flex-shrink-0">
+                    {/* Edit Template toggle */}
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(notif.id)}
+                      className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 hover:bg-gray-100 rounded-md px-2 py-1 transition-colors"
+                      aria-expanded={notif.expanded}
+                    >
+                      {notif.expanded
+                        ? <ChevronUp className="h-3.5 w-3.5" />
+                        : <ChevronDown className="h-3.5 w-3.5" />
+                      }
+                      Edit Template
+                    </button>
+                    {/* Enable toggle */}
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={notif.isEnabled}
+                      onClick={() => toggleNotification(notif.id)}
+                      disabled={!isEnabled}
+                      className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed ${notif.isEnabled ? "bg-blue-600" : "bg-gray-200"}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${notif.isEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expanded template editor */}
+                {notif.expanded && (
+                  <div className="px-6 pb-5 bg-gray-50 border-t border-gray-100">
+                    <div className="pt-4 space-y-4">
+                      {/* Subject */}
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          Subject
+                        </label>
+                        <input
+                          type="text"
+                          value={notif.templateSubject}
+                          onChange={(e) => updateTemplateSubject(notif.id, e.target.value)}
+                          placeholder="Email subject line..."
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        />
+                      </div>
+
+                      {/* Body */}
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          Body
+                        </label>
+                        <textarea
+                          value={notif.templateBody}
+                          onChange={(e) => updateTemplateBody(notif.id, e.target.value)}
+                          placeholder="Email body..."
+                          rows={4}
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-y font-mono"
+                        />
+                      </div>
+
+                      {/* Available variables */}
+                      {triggerVars.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-slate-500 mb-1.5">Available variables</p>
+                          <div className="flex flex-wrap">
+                            {triggerVars.map((v) => (
+                              <span
+                                key={v}
+                                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-gray-100 text-gray-600 mr-1 mb-1"
+                              >
+                                {v}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
-                <code className="text-[10px] text-slate-400 font-mono mt-0.5 block">{notif.trigger}</code>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={notif.isEnabled}
-                onClick={() => toggleNotification(notif.id)}
-                disabled={!isEnabled}
-                className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed ${notif.isEnabled ? "bg-blue-600" : "bg-gray-200"}`}
-              >
-                <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${notif.isEnabled ? "translate-x-5" : "translate-x-0"}`} />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

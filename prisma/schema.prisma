@@ -18,14 +18,57 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userRoles       UserRole[]
-  createdPolicies Policy[]       @relation("CreatedBy")
-  updatedPolicies Policy[]       @relation("UpdatedBy")
-  reviews         PolicyReview[]
-  views           PolicyView[]
-  comments        Comment[]
+  userRoles              UserRole[]
+  createdPolicies        Policy[]               @relation("CreatedBy")
+  updatedPolicies        Policy[]               @relation("UpdatedBy")
+  reviews                PolicyReview[]
+  views                  PolicyView[]
+  comments               Comment[]
+  acknowledgments        PolicyAcknowledgment[]
+  travelSubmissions      TravelRequest[]        @relation("TravelSubmittedBy")
+  travelReviews          TravelRequest[]        @relation("TravelReviewedBy")
+  announcementsCreated   Announcement[]         @relation("AnnouncementCreatedBy")
+  announcementDismissals AnnouncementDismissal[]
+  onCallEntries          OnCallEntry[]          @relation("OnCallUser")
+  onCallCreated          OnCallEntry[]          @relation("OnCallCreatedBy")
+  runbooksCreated        Runbook[]              @relation("RunbookCreatedBy")
+  runbooksUpdated        Runbook[]              @relation("RunbookUpdatedBy")
+  teamLead               Team[]                 @relation("TeamLead")
+  teamMemberships        TeamMember[]
+  staffProjects          StaffProject[]
+  staffReports           StaffReport[]
+  chatMessages           ChatMessage[]
+  quickLinksCreated      QuickLink[]            @relation("QuickLinkCreatedBy")
+  projectsCreated        Project[]              @relation("ProjectCreatedBy")
+  projectMembers         ProjectMember[]
+  tasksAssigned          ProjectTask[]          @relation("TaskAssignee")
+  tasksCreated           ProjectTask[]          @relation("TaskCreatedBy")
+  pushSubscriptions      PushSubscription[]
 
   @@map("users")
+}
+
+// ─── Push Notifications ───────────────────────────────────────────────────────
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("push_subscriptions")
+}
+
+// Last-known offline serials — used to detect NEW outages and avoid re-alerting
+model NetworkAlertSnapshot {
+  id             String   @id @default("singleton")
+  offlineSerials String   @default("[]") // JSON array of serial strings
+  checkedAt      DateTime @default(now())
+  @@map("network_alert_snapshots")
 }
 
 // ─── RBAC ─────────────────────────────────────────────────────────────────────
@@ -88,6 +131,14 @@ enum PolicyStatus {
   ARCHIVED
 }
 
+enum ReviewFrequency {
+  NONE
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUAL
+  ANNUAL
+}
+
 model Policy {
   id          String       @id @default(cuid())
   title       String
@@ -101,16 +152,27 @@ model Policy {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
+  // Review scheduling
+  reviewFrequency    ReviewFrequency @default(NONE)
+  nextReviewDate     DateTime?
+  lastReviewedAt     DateTime?
+  reviewReminderDays Int             @default(30)
+
+  // Acknowledgment
+  acknowledgmentRequired Boolean   @default(false)
+  acknowledgmentDeadline DateTime?
+
   createdById String
   updatedById String?
 
   createdBy User  @relation("CreatedBy", fields: [createdById], references: [id])
   updatedBy User? @relation("UpdatedBy", fields: [updatedById], references: [id])
 
-  reviews  PolicyReview[]
-  tags     PolicyTag[]
-  views    PolicyView[]
-  comments Comment[]
+  reviews          PolicyReview[]
+  tags             PolicyTag[]
+  views            PolicyView[]
+  comments         Comment[]
+  acknowledgments  PolicyAcknowledgment[]
 
   @@map("policies")
 }
@@ -134,6 +196,7 @@ model Tag {
   name String @unique
 
   policies PolicyTag[]
+  runbooks RunbookTag[]
 
   @@map("tags")
 }
@@ -175,6 +238,19 @@ model Comment {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("comments")
+}
+
+model PolicyAcknowledgment {
+  id             String   @id @default(cuid())
+  policyId       String
+  userId         String
+  acknowledgedAt DateTime @default(now())
+
+  policy Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, userId])
+  @@map("policy_acknowledgments")
 }
 
 // ─── SSO Configuration ────────────────────────────────────────────────────────
@@ -225,4 +301,412 @@ model EmailNotification {
   config EmailConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
   @@map("email_notifications")
+}
+
+// ─── Travel Exception Requests ────────────────────────────────────────────────
+
+enum TravelRequestStatus {
+  PENDING           // submitted, awaiting exception config
+  EXCEPTION_ACTIVE  // exception configured, trip in progress
+  EXCEPTION_REMOVED // exception removed, trip complete
+  DENIED            // request denied by security team
+}
+
+model TravelRequest {
+  id                    String               @id @default(cuid())
+  travelerName          String
+  travelerEmail         String
+  destinations          String
+  departureDate         DateTime
+  returnDate            DateTime
+  additionalTravelers   String?
+  status                TravelRequestStatus  @default(PENDING)
+  securityNotes         String?
+  submittedById         String
+  reviewedById          String?
+  exceptionConfiguredAt DateTime?
+  exceptionRemovedAt    DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  submittedBy User  @relation("TravelSubmittedBy", fields: [submittedById], references: [id])
+  reviewedBy  User? @relation("TravelReviewedBy",  fields: [reviewedById],  references: [id])
+
+  @@map("travel_requests")
+}
+
+// ─── IT Announcements ─────────────────────────────────────────────────────────
+
+enum AnnouncementPriority {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model Announcement {
+  id          String               @id @default(cuid())
+  title       String
+  body        String
+  priority    AnnouncementPriority @default(INFO)
+  status      AnnouncementStatus   @default(DRAFT)
+  publishedAt DateTime?
+  expiresAt   DateTime?
+  createdById String
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  createdBy  User                    @relation("AnnouncementCreatedBy", fields: [createdById], references: [id])
+  dismissals AnnouncementDismissal[]
+
+  @@map("announcements")
+}
+
+model AnnouncementDismissal {
+  announcementId String
+  userId         String
+  dismissedAt    DateTime @default(now())
+
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId],         references: [id], onDelete: Cascade)
+
+  @@id([announcementId, userId])
+  @@map("announcement_dismissals")
+}
+
+// ─── On-Call Schedule ─────────────────────────────────────────────────────────
+
+model OnCallEntry {
+  id            String   @id @default(cuid())
+  userId        String
+  startDate     DateTime
+  endDate       DateTime
+  phoneOverride String?
+  notes         String?
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user      User @relation("OnCallUser",      fields: [userId],      references: [id])
+  createdBy User @relation("OnCallCreatedBy", fields: [createdById], references: [id])
+
+  @@map("oncall_entries")
+}
+
+// ─── Runbook Library ──────────────────────────────────────────────────────────
+
+enum RunbookStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Runbook {
+  id          String        @id @default(cuid())
+  title       String
+  slug        String        @unique
+  summary     String?
+  content     String
+  category    String?
+  status      RunbookStatus @default(DRAFT)
+  createdById String
+  updatedById String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  createdBy User       @relation("RunbookCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?      @relation("RunbookUpdatedBy", fields: [updatedById], references: [id])
+  tags      RunbookTag[]
+
+  @@map("runbooks")
+}
+
+model RunbookTag {
+  runbookId String
+  tagId     String
+
+  runbook Runbook @relation(fields: [runbookId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId],     references: [id], onDelete: Cascade)
+
+  @@id([runbookId, tagId])
+  @@map("runbook_tags")
+}
+
+// ─── Weekly Status Reports ────────────────────────────────────────────────────
+
+enum ReportInterval {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum ReportStatus {
+  DRAFT
+  SUBMITTED
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+}
+
+model ReportConfig {
+  id           String         @id @default(cuid())
+  interval     ReportInterval @default(WEEKLY)
+  dueDayOfWeek Int            @default(5)
+  reminderDays Int            @default(1)
+  isEnabled    Boolean        @default(true)
+  updatedAt    DateTime       @updatedAt
+
+  @@map("report_configs")
+}
+
+model Team {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  description    String?
+  leadId         String
+  reportsEnabled Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lead     User         @relation("TeamLead", fields: [leadId], references: [id])
+  members  TeamMember[]
+  reports  StaffReport[]
+  projects Project[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  teamId   String
+  userId   String
+  joinedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@map("team_members")
+}
+
+model StaffProject {
+  id          String        @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updates StaffProjectUpdate[]
+
+  @@map("staff_projects")
+}
+
+model StaffReport {
+  id              String       @id @default(cuid())
+  userId          String
+  teamId          String?
+  periodStart     DateTime
+  periodEnd       DateTime
+  accomplishments String?
+  priorities      String?
+  blockers        String?
+  status          ReportStatus @default(DRAFT)
+  submittedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team           Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  projectUpdates StaffProjectUpdate[]
+
+  @@map("staff_reports")
+}
+
+model StaffProjectUpdate {
+  id           String  @id @default(cuid())
+  projectId    String
+  reportId     String
+  progressNote String?
+
+  project StaffProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  report  StaffReport  @relation(fields: [reportId],  references: [id], onDelete: Cascade)
+
+  @@unique([projectId, reportId])
+  @@map("staff_project_updates")
+}
+
+// ─── IT Chat + Teams Integration ─────────────────────────────────────────────
+
+enum MessageSource {
+  PLATFORM
+  TEAMS
+}
+
+model ChatMessage {
+  id             String        @id @default(cuid())
+  content        String
+  userId         String?
+  senderName     String
+  source         MessageSource @default(PLATFORM)
+  teamsMessageId String?
+  createdAt      DateTime      @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("chat_messages")
+}
+
+model TeamsConfig {
+  id                 String   @id @default(cuid())
+  isEnabled          Boolean  @default(false)
+  incomingWebhookUrl String?
+  verificationToken  String?
+  channelName        String?
+  updatedAt          DateTime @updatedAt
+
+  @@map("teams_configs")
+}
+
+// ─── Quick Links ──────────────────────────────────────────────────────────────
+
+model QuickLink {
+  id           String   @id @default(cuid())
+  title        String
+  url          String
+  description  String?
+  icon         String?
+  displayOrder Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdBy User @relation("QuickLinkCreatedBy", fields: [createdById], references: [id])
+
+  @@map("quick_links")
+}
+
+// ─── Branding ─────────────────────────────────────────────────────────────────
+
+model BrandingConfig {
+  id           String   @id @default(cuid())
+  platformName String   @default("Yield")
+  tagline      String?
+  logoUrl      String?
+  faviconUrl   String?
+  updatedAt    DateTime @updatedAt
+
+  @@map("branding_configs")
+}
+
+model MerakiConfig {
+  id        String   @id @default(cuid())
+  apiKey    String?
+  orgId     String?
+  isEnabled Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@map("meraki_configs")
+}
+
+// ─── Project Management ───────────────────────────────────────────────────────
+
+enum MgmtProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Project {
+  id          String            @id @default(cuid())
+  title       String
+  description String?
+  status      MgmtProjectStatus @default(PLANNING)
+  startDate   DateTime?
+  endDate     DateTime?
+  teamId      String?
+  createdById String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  team      Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  createdBy User            @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  tasks     ProjectTask[]
+  members   ProjectMember[]
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  projectId String
+  userId    String
+  role      String?
+  joinedAt  DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@map("project_members")
+}
+
+model ProjectTask {
+  id           String       @id @default(cuid())
+  projectId    String
+  title        String
+  description  String?
+  status       TaskStatus   @default(TODO)
+  priority     TaskPriority @default(MEDIUM)
+  startDate    DateTime?
+  endDate      DateTime?
+  assigneeId   String?
+  reminderDays Int          @default(1)
+  createdById  String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee     User?            @relation("TaskAssignee",  fields: [assigneeId],  references: [id], onDelete: SetNull)
+  createdBy    User             @relation("TaskCreatedBy", fields: [createdById], references: [id])
+  dependsOn    TaskDependency[] @relation("DependentTask")
+  dependedOnBy TaskDependency[] @relation("DependencyTask")
+
+  @@map("project_tasks")
+}
+
+model TaskDependency {
+  dependentTaskId  String
+  dependencyTaskId String
+
+  dependentTask  ProjectTask @relation("DependentTask",  fields: [dependentTaskId],  references: [id], onDelete: Cascade)
+  dependencyTask ProjectTask @relation("DependencyTask", fields: [dependencyTaskId], references: [id], onDelete: Cascade)
+
+  @@id([dependentTaskId, dependencyTaskId])
+  @@map("task_dependencies")
 }

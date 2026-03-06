@@ -7,7 +7,7 @@ import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { PoliciesFilters } from "@/components/policies/PoliciesFilters";
-import { FileText, Plus } from "lucide-react";
+import { FileText, Plus, AlertTriangle, Bell } from "lucide-react";
 
 export const metadata = { title: "Policies" };
 
@@ -53,6 +53,7 @@ async function getPolicies(params: SearchParams, userPermissions: string[]) {
         tags: { include: { tag: true } },
         _count: { select: { reviews: true } },
       },
+      // Include review and acknowledgment fields
     }),
     prisma.policy.findMany({
       where: { category: { not: null } },
@@ -68,6 +69,7 @@ async function getPolicies(params: SearchParams, userPermissions: string[]) {
 export default async function PoliciesPage({ searchParams }: { searchParams: SearchParams }) {
   const session     = await getServerSession(authOptions);
   const permissions = session?.user?.permissions ?? [];
+  const userId      = session?.user?.id ?? "";
   const canCreate   = hasPermission(permissions, PERMISSIONS.POLICIES_CREATE);
 
   const { policies, categories, tags } = await getPolicies(searchParams, permissions);
@@ -106,48 +108,70 @@ export default async function PoliciesPage({ searchParams }: { searchParams: Sea
             <p className="text-xs text-slate-400 mt-1">Try adjusting your search or filters</p>
           </div>
         )}
-        {policies.map((policy) => (
-          <Link
-            key={policy.id}
-            href={`/policies/${policy.id}`}
-            className="block bg-white rounded-xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-sm transition-all"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <h3 className="font-semibold text-slate-900 truncate">{policy.title}</h3>
-                  <Badge variant={policyStatusVariant(policy.status)}>
-                    {policyStatusLabel(policy.status)}
-                  </Badge>
+        {policies.map((policy) => {
+          const now = new Date();
+          const isReviewDue = canCreate && policy.reviewFrequency !== "NONE"
+            && policy.nextReviewDate
+            && new Date(policy.nextReviewDate) <= new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+          const isReviewOverdue = isReviewDue && policy.nextReviewDate && new Date(policy.nextReviewDate) < now;
+
+          return (
+            <Link
+              key={policy.id}
+              href={`/policies/${policy.id}`}
+              className="block bg-white rounded-xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-sm transition-all"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <h3 className="font-semibold text-slate-900 truncate">{policy.title}</h3>
+                    <Badge variant={policyStatusVariant(policy.status)}>
+                      {policyStatusLabel(policy.status)}
+                    </Badge>
+                    {policy.acknowledgmentRequired && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                        <Bell className="h-3 w-3" /> Ack required
+                      </span>
+                    )}
+                    {isReviewDue && (
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${isReviewOverdue ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}`}>
+                        <AlertTriangle className="h-3 w-3" />
+                        {isReviewOverdue ? "Review overdue" : "Review due soon"}
+                      </span>
+                    )}
+                  </div>
+                  {policy.summary && (
+                    <p className="text-sm text-slate-500 line-clamp-2 mb-2">{policy.summary}</p>
+                  )}
+                  <div className="flex items-center gap-3 flex-wrap text-xs text-slate-400">
+                    {policy.category && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 font-medium">
+                        {policy.category}
+                      </span>
+                    )}
+                    {policy.tags.map((pt) => (
+                      <span key={pt.tag.id} className="rounded-full bg-gray-100 px-2 py-0.5 text-slate-600">
+                        {pt.tag.name}
+                      </span>
+                    ))}
+                    <span className="text-slate-300">•</span>
+                    <span>Updated {formatDate(policy.updatedAt)}</span>
+                    <span>by {policy.createdBy.name}</span>
+                    {policy._count.reviews > 0 && (
+                      <span>{policy._count.reviews} review{policy._count.reviews !== 1 ? "s" : ""}</span>
+                    )}
+                    {policy.nextReviewDate && policy.reviewFrequency !== "NONE" && (
+                      <span>· Review: {formatDate(policy.nextReviewDate)}</span>
+                    )}
+                  </div>
                 </div>
-                {policy.summary && (
-                  <p className="text-sm text-slate-500 line-clamp-2 mb-2">{policy.summary}</p>
-                )}
-                <div className="flex items-center gap-3 flex-wrap text-xs text-slate-400">
-                  {policy.category && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 font-medium">
-                      {policy.category}
-                    </span>
-                  )}
-                  {policy.tags.map((pt) => (
-                    <span key={pt.tag.id} className="rounded-full bg-gray-100 px-2 py-0.5 text-slate-600">
-                      {pt.tag.name}
-                    </span>
-                  ))}
-                  <span className="text-slate-300">•</span>
-                  <span>Updated {formatDate(policy.updatedAt)}</span>
-                  <span>by {policy.createdBy.name}</span>
-                  {policy._count.reviews > 0 && (
-                    <span>{policy._count.reviews} review{policy._count.reviews !== 1 ? "s" : ""}</span>
-                  )}
+                <div className="text-xs text-slate-400 flex-shrink-0 text-right">
+                  <div>v{policy.version}</div>
                 </div>
               </div>
-              <div className="text-xs text-slate-400 flex-shrink-0 text-right">
-                <div>v{policy.version}</div>
-              </div>
-            </div>
-          </Link>
-        ))}
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

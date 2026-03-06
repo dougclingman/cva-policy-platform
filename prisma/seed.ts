@@ -19,6 +19,15 @@ async function main() {
     { name: "admin:roles",         resource: "admin", action: "roles",         description: "Manage roles and permissions" },
     { name: "admin:sso",           resource: "admin", action: "sso",           description: "Configure SSO" },
     { name: "admin:notifications", resource: "admin", action: "notifications", description: "Configure email notifications" },
+    { name: "travel:manage",         resource: "travel",         action: "manage",  description: "View and action international travel exception requests" },
+    { name: "announcements:manage",  resource: "announcements",  action: "manage",  description: "Create and publish IT announcements" },
+    { name: "oncall:manage",         resource: "oncall",         action: "manage",  description: "Manage on-call schedule entries" },
+    { name: "runbooks:read",         resource: "runbooks",       action: "read",    description: "View runbooks and procedures" },
+    { name: "runbooks:manage",       resource: "runbooks",       action: "manage",  description: "Create and publish runbooks" },
+    { name: "reports:submit",        resource: "reports",        action: "submit",  description: "Submit weekly status reports" },
+    { name: "reports:manage",        resource: "reports",        action: "manage",  description: "Configure report teams and view all reports" },
+    { name: "projects:read",         resource: "projects",       action: "read",    description: "View projects for assigned teams" },
+    { name: "projects:manage",       resource: "projects",       action: "manage",  description: "Create and manage projects, tasks, and dependencies" },
   ];
 
   const permissions: Record<string, { id: string }> = {};
@@ -44,19 +53,43 @@ async function main() {
       name: "Policy Manager",
       description: "Creates, edits, publishes, and archives policies",
       isSystem: true,
-      permissions: ["policies:read", "policies:create", "policies:update", "policies:delete", "policies:publish"],
+      permissions: ["policies:read", "policies:create", "policies:update", "policies:delete", "policies:publish", "runbooks:read", "runbooks:manage", "reports:submit"],
     },
     {
       name: "Reviewer",
       description: "Reviews and approves policies before publication",
       isSystem: true,
-      permissions: ["policies:read", "policies:review"],
+      permissions: ["policies:read", "policies:review", "runbooks:read", "reports:submit"],
     },
     {
       name: "Viewer",
       description: "Read-only access to published policies",
       isSystem: true,
-      permissions: ["policies:read"],
+      permissions: ["policies:read", "reports:submit"],
+    },
+    {
+      name: "IT Security",
+      description: "Manages international travel exception requests, O365 remote-access configurations, and on-call schedule",
+      isSystem: true,
+      permissions: ["travel:manage", "oncall:manage", "runbooks:read", "reports:submit"],
+    },
+    {
+      name: "IT Communicator",
+      description: "Creates and publishes IT announcements and service bulletins to the department",
+      isSystem: true,
+      permissions: ["announcements:manage", "reports:submit"],
+    },
+    {
+      name: "On-Call Manager",
+      description: "Maintains the on-call rotation schedule",
+      isSystem: true,
+      permissions: ["oncall:manage", "reports:submit"],
+    },
+    {
+      name: "Project Manager",
+      description: "Creates and manages IT projects, tasks, timelines, and team assignments",
+      isSystem: true,
+      permissions: ["projects:read", "projects:manage", "reports:submit"],
     },
   ];
 
@@ -291,20 +324,80 @@ Report lost or stolen devices immediately to the IT help desk.
     });
 
     const notificationDefs = [
-      { trigger: "policy.published",         name: "Policy Published",           description: "Notify team when a policy is published" },
-      { trigger: "policy.review_requested",  name: "Review Requested",           description: "Notify reviewers when a policy needs review" },
-      { trigger: "policy.review_completed",  name: "Review Completed",           description: "Notify policy manager when a review is completed" },
-      { trigger: "policy.archived",          name: "Policy Archived",            description: "Notify when a policy is archived" },
-      { trigger: "user.created",             name: "New User Created",           description: "Notify admin when a new user account is created" },
-      { trigger: "user.deactivated",         name: "User Deactivated",           description: "Notify admin when a user account is deactivated" },
+      { trigger: "policy.published",                name: "Policy Published",                description: "Notify team when a policy is published" },
+      { trigger: "policy.review_requested",         name: "Review Requested",                description: "Notify reviewers when a policy needs review" },
+      { trigger: "policy.review_completed",         name: "Review Completed",                description: "Notify policy manager when a review is completed" },
+      { trigger: "policy.archived",                 name: "Policy Archived",                 description: "Notify when a policy is archived" },
+      { trigger: "policy.review_due",               name: "Policy Review Due",               description: "Remind policy managers when a scheduled review is approaching" },
+      { trigger: "policy.acknowledgment_requested", name: "Acknowledgment Requested",        description: "Notify all users when a policy requires acknowledgment" },
+      { trigger: "policy.acknowledgment_reminder",  name: "Acknowledgment Reminder",         description: "Remind users who have not yet acknowledged a required policy" },
+      { trigger: "user.created",                    name: "New User Created",                description: "Notify admin when a new user account is created" },
+      { trigger: "user.deactivated",                name: "User Deactivated",                description: "Notify admin when a user account is deactivated" },
+      { trigger: "travel.exception_requested",      name: "Travel Exception Requested",      description: "Notify IT Security team when a new travel exception request is submitted" },
+      { trigger: "travel.exception_configured",     name: "Travel Exception Configured",     description: "Notify traveler when their O365 remote-access exception is active" },
+      { trigger: "travel.exception_removed",        name: "Travel Exception Removed",        description: "Notify traveler when their O365 remote-access exception has been lifted" },
+      { trigger: "travel.exception_removal_reminder", name: "Travel Exception Removal Reminder", description: "Remind IT Security to remove the O365 exception after the traveler returns" },
     ];
     for (const n of notificationDefs) {
       await prisma.emailNotification.create({
         data: { ...n, isEnabled: false, configId: emailConfig.id },
       });
     }
+  } else {
+    // Add any missing notification triggers to existing email config
+    const emailConfig = await prisma.emailConfig.findFirst();
+    if (emailConfig) {
+      const additionalNotificationDefs = [
+        { trigger: "travel.exception_requested",        name: "Travel Exception Requested",        description: "Notify IT Security team when a new travel exception request is submitted" },
+        { trigger: "travel.exception_configured",       name: "Travel Exception Configured",       description: "Notify traveler when their O365 remote-access exception is active" },
+        { trigger: "travel.exception_removed",          name: "Travel Exception Removed",          description: "Notify traveler when their O365 remote-access exception has been lifted" },
+        { trigger: "travel.exception_removal_reminder", name: "Travel Exception Removal Reminder", description: "Remind IT Security to remove the O365 exception after the traveler returns" },
+        { trigger: "announcement.published",            name: "Announcement Published",            description: "Notify all users when a new IT announcement is published" },
+        { trigger: "report.reminder",                   name: "Status Report Reminder",            description: "Remind team members when their status report is due" },
+        { trigger: "oncall.upcoming",                   name: "On-Call Starting",                  description: "Remind on-call person they start their rotation tomorrow" },
+        { trigger: "task.deadline",                     name: "Task Deadline Reminder",            description: "Remind task assignee X days before a project task deadline" },
+      ];
+      for (const n of additionalNotificationDefs) {
+        const existing = await prisma.emailNotification.findFirst({ where: { trigger: n.trigger } });
+        if (!existing) {
+          await prisma.emailNotification.create({
+            data: { ...n, isEnabled: false, configId: emailConfig.id },
+          });
+        }
+      }
+    }
   }
   console.log("  ✓ SSO config + email notification templates");
+
+  // ─── Teams Config (placeholder) ─────────────────────────────────────────────
+  const teamsCount = await prisma.teamsConfig.count();
+  if (teamsCount === 0) {
+    await prisma.teamsConfig.create({ data: { isEnabled: false } });
+  }
+
+  // ─── Report Config (default) ─────────────────────────────────────────────────
+  const reportConfigCount = await prisma.reportConfig.count();
+  if (reportConfigCount === 0) {
+    await prisma.reportConfig.create({
+      data: { interval: "WEEKLY", dueDayOfWeek: 5, reminderDays: 1, isEnabled: false },
+    });
+  }
+  console.log("  ✓ Teams config + report config defaults");
+
+  // ─── Branding Config (default) ───────────────────────────────────────────────
+  const brandingCount = await prisma.brandingConfig.count();
+  if (brandingCount === 0) {
+    await prisma.brandingConfig.create({
+      data: {
+        id: "default",
+        platformName: "Yield",
+        tagline: "Cooperative innovation, delivered.",
+        logoUrl: null,
+        faviconUrl: null,
+      },
+    });
+  }
+  console.log("  ✓ Branding config defaults");
 
   console.log("\nSeed complete!");
   console.log("─────────────────────────────────────");

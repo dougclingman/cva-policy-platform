@@ -14,6 +14,9 @@ interface Policy {
   category?: string | null;
   status: string;
   tags: { tag: Tag }[];
+  reviewFrequency?: string | null;
+  nextReviewDate?: string | Date | null;
+  reviewReminderDays?: number | null;
 }
 
 interface Props {
@@ -27,6 +30,26 @@ const CATEGORIES = [
   "Compliance", "HR", "Software", "Hardware", "Operations",
 ];
 
+const REVIEW_FREQUENCIES = [
+  { value: "NONE",       label: "No scheduled review" },
+  { value: "MONTHLY",    label: "Monthly" },
+  { value: "QUARTERLY",  label: "Quarterly (every 3 months)" },
+  { value: "SEMI_ANNUAL", label: "Semi-Annual (every 6 months)" },
+  { value: "ANNUAL",     label: "Annual (every year)" },
+];
+
+function calcNextReviewDate(frequency: string): string {
+  const now = new Date();
+  switch (frequency) {
+    case "MONTHLY":    now.setMonth(now.getMonth() + 1); break;
+    case "QUARTERLY":  now.setMonth(now.getMonth() + 3); break;
+    case "SEMI_ANNUAL": now.setMonth(now.getMonth() + 6); break;
+    case "ANNUAL":     now.setFullYear(now.getFullYear() + 1); break;
+    default:           return "";
+  }
+  return now.toISOString().slice(0, 10);
+}
+
 export function PolicyForm({ policy, tags, mode }: Props) {
   const router = useRouter();
 
@@ -38,6 +61,14 @@ export function PolicyForm({ policy, tags, mode }: Props) {
   const [selTags,  setSelTags]  = useState<string[]>(policy?.tags.map((t) => t.tag.id) ?? []);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState("");
+
+  const [reviewFrequency,    setReviewFrequency]    = useState(policy?.reviewFrequency ?? "NONE");
+  const [nextReviewDate,     setNextReviewDate]     = useState(
+    policy?.nextReviewDate ? new Date(policy.nextReviewDate).toISOString().slice(0, 10) : ""
+  );
+  const [reviewReminderDays, setReviewReminderDays] = useState(
+    policy?.reviewReminderDays ?? 30
+  );
 
   const CONTENT_TEMPLATE = `# ${title || "Policy Title"}
 
@@ -66,6 +97,15 @@ This policy is reviewed annually.
     );
   }
 
+  function handleFrequencyChange(freq: string) {
+    setReviewFrequency(freq);
+    if (freq !== "NONE") {
+      setNextReviewDate(calcNextReviewDate(freq));
+    } else {
+      setNextReviewDate("");
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) { setError("Title is required"); return; }
@@ -82,6 +122,9 @@ This policy is reviewed annually.
         category: category || null,
         status,
         tagIds: selTags,
+        reviewFrequency,
+        nextReviewDate: nextReviewDate || null,
+        reviewReminderDays: Number(reviewReminderDays),
       };
 
       const url    = mode === "create" ? "/api/policies" : `/api/policies/${policy!.id}`;
@@ -203,6 +246,50 @@ This policy is reviewed annually.
               <option value="">— None —</option>
               {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+          </div>
+
+          {/* Review Schedule */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+            <label className="block text-sm font-semibold text-slate-700">Review Schedule</label>
+
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Review Frequency</label>
+              <select
+                value={reviewFrequency}
+                onChange={(e) => handleFrequencyChange(e.target.value)}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-white"
+              >
+                {REVIEW_FREQUENCIES.map((f) => (
+                  <option key={f.value} value={f.value}>{f.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {reviewFrequency !== "NONE" && (
+              <>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Next Review Date</label>
+                  <input
+                    type="date"
+                    value={nextReviewDate}
+                    onChange={(e) => setNextReviewDate(e.target.value)}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Reminder Lead Time (days)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={reviewReminderDays}
+                    onChange={(e) => setReviewReminderDays(Number(e.target.value))}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  <p className="text-xs text-slate-400 mt-0.5">Flag as due this many days before the review date</p>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Tags */}
