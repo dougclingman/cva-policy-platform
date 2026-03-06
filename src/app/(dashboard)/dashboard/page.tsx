@@ -8,11 +8,10 @@ import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { PERMISSIONS } from "@/lib/permissions";
 import { AnnouncementBanners } from "@/components/announcements/AnnouncementBanners";
-import { WeatherWidget, WeatherWidgetError } from "@/components/dashboard/WeatherWidget";
+import { WeatherWidget } from "@/components/dashboard/WeatherWidget";
 import { NewsWidget } from "@/components/dashboard/NewsWidget";
-import type { WeatherData } from "@/app/api/weather/route";
-import type { NewsArticle } from "@/app/api/news/route";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "Dashboard" };
 
 async function getStats(userId: string, permissions: string[]) {
@@ -145,20 +144,6 @@ export default async function DashboardPage() {
     } catch { /* ignore */ }
   }
 
-  // Weather + News — fetched in parallel, failures are non-fatal
-  const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const [weatherRes, newsRes] = await Promise.allSettled([
-    fetch(`${baseUrl}/api/weather`, { next: { revalidate: 1800 } }),
-    fetch(`${baseUrl}/api/news`,    { next: { revalidate: 1800 } }),
-  ]);
-  const weather: WeatherData | null =
-    weatherRes.status === "fulfilled" && weatherRes.value.ok
-      ? await weatherRes.value.json()
-      : null;
-  const news: NewsArticle[] =
-    newsRes.status === "fulfilled" && newsRes.value.ok
-      ? await newsRes.value.json()
-      : [];
 
   const statCards = [
     { label: "Total Policies",  value: stats.total,       icon: FileText,     color: "text-blue-600",   bg: "bg-blue-50" },
@@ -441,14 +426,8 @@ export default async function DashboardPage() {
       {/* ── Zone 5: Ambient info ──────────────────────────────────── */}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div>
-          {weather && !("error" in weather)
-            ? <WeatherWidget weather={weather} />
-            : <WeatherWidgetError />}
-        </div>
-        <div className="lg:col-span-2">
-          <NewsWidget articles={news} />
-        </div>
+        <div><WeatherWidget /></div>
+        <div className="lg:col-span-2"><NewsWidget /></div>
       </div>
 
       {/* ── Zone 6: Recent activity ───────────────────────────────── */}
